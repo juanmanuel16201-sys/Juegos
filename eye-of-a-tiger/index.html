@@ -389,6 +389,10 @@ table.tbl{width:100%;border-collapse:collapse;font-family:var(--cond);font-size:
         <div><div class="cface-lbl">Tu cara en el ring</div>
           <p class="cface-note" id="faceSetNote">La cabeza del boxeador se cambia por tu foto. Toca cada círculo para subir una foto de frente (JPG o PNG). Feliz y Sorpresa son opcionales: si faltan, animamos la normal. Elige el boxeador en «Tu cara», abajo.</p>
           <div class="cface-btns"><button class="btn gold" id="facePhotoS" type="button">Subir foto</button><button class="btn" id="faceAdjS" type="button">Ajustar</button><button class="btn" id="faceDelS" type="button">Quitar</button></div></div></div>
+      <div class="face-set"><div><div class="cface-lbl">Canción del menú</div>
+          <p class="cface-note"><b id="songName">Música original del juego</b><br>Elige una canción de tu computador (MP3, M4A u OGG) y sonará en el menú. Se guarda solo en este navegador.</p>
+          <div class="cface-btns"><button class="btn gold" id="songPick" type="button">Elegir canción</button><button class="btn" id="songDel" type="button">Quitar</button></div></div></div>
+      <input type="file" id="songFile" accept="audio/*" hidden>
       <div class="groups" id="setForm"></div>
     </div>
     <div class="panel-foot"><button class="btn" id="setReset">Restablecer</button><div class="right"><button class="btn primary" data-back>Listo</button></div></div>
@@ -639,7 +643,7 @@ const RULES_PRO = {
 // ---------- Ajustes guardados ----------
 const DEFAULTS = {
   quality: 'alto', style: 'hd', cfgV: 2, viewMode: 'arena', fov: 62, shake: true, gore: 'alto', dynRes: true, showFps: false,
-  cameraId: '', trackModel: 'full', punchSens: 1, dodgeSens: 1, stance: 'ortodoxa', mirror: true, showSkeleton: true,
+  cameraId: '', trackModel: 'full', punchSens: 1, dodgeSens: 1, stance: 'ortodoxa', mirror: true, showSkeleton: true, camFlip: 'auto', autoFlip: false,
   master: .8, sfx: .9, music: .5, voice: true,
   faceTarget: 'rival', playerName: 'JUAN', playerColor: '#2463c9', playerSkin: '#c8915f',
 };
@@ -666,7 +670,7 @@ const Snd = {
     for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
     this.nb = b; this.vol();
   },
-  vol() { if (!this.ctx) return; this.master.gain.value = S.master; this.sfxG.gain.value = S.sfx; this.musG.gain.value = S.music * .5; },
+  vol() { if (!this.ctx) return; this.master.gain.value = S.master; this.sfxG.gain.value = S.sfx; this.musG.gain.value = S.music * .5; if (this.songG) this.songG.gain.value = S.music * 1.1; },
   nz(dur, type, f0, q, gain, delay = 0, f1, dest) {
     const c = this.ctx; if (!c) return; const t = c.currentTime + delay;
     const s = c.createBufferSource(); s.buffer = this.nb;
@@ -702,6 +706,11 @@ const Snd = {
   },
   musicOn() {
     if (!this.ctx || this.mus) return;
+    // canción elegida por el jugador
+    if (MyMusic.url) {
+      if (!this.songNode) { try { this.songG = this.ctx.createGain(); this.songG.connect(this.master); this.songNode = this.ctx.createMediaElementSource(MyMusic.el); this.songNode.connect(this.songG); } catch (e) {} this.vol(); }
+      MyMusic.el.play().catch(() => {}); this.mus = 'song'; return;
+    }
     const step = 60 / 94 / 4, bass = [45, 0, 45, 0, 48, 0, 45, 43, 45, 0, 45, 0, 52, 0, 50, 48];
     let n = 0, next = this.ctx.currentTime + .1; const M = this.musG, mid = m => 440 * Math.pow(2, (m - 69) / 12);
     this.mus = setInterval(() => {
@@ -716,7 +725,7 @@ const Snd = {
       }
     }, 25);
   },
-  musicOff() { clearInterval(this.mus); this.mus = null; },
+  musicOff() { if (this.mus === 'song') { MyMusic.el.pause(); this.mus = null; return; } clearInterval(this.mus); this.mus = null; },
   say(txt, rate = 1.05, cancel = false) {
     if (!S.voice || !('speechSynthesis' in window)) return;
     try {
@@ -1270,7 +1279,7 @@ function applyView() {
   scene.environment = ar ? roomEnv : (arenaEnvRT ? arenaEnvRT.texture : roomEnv);
   renderer.toneMappingExposure = ar ? 1 : (arena.exposure || 1.05);
   $('#camVideo').classList.toggle('on', !!ar);
-  $('#camVideo').classList.toggle('mirror', S.mirror);
+  $('#camVideo').classList.toggle('mirror', camMirror());
   $('#pip').hidden = !!ar;
 }
 
@@ -2090,7 +2099,7 @@ const PlayerFace = {
   },
   drawScreen(g, W, H) {
     const v = Pose.video, vw = v.videoWidth || 640, vh = v.videoHeight || 480; const sc = Math.max(W / vw, H / vh), ox = (W - vw * sc) / 2, oy = (H - vh * sc) / 2;
-    const toXY = (x, y) => [S.mirror ? W - (ox + x * vw * sc) : ox + x * vw * sc, oy + y * vh * sc];
+    const toXY = (x, y) => [camMirror() ? W - (ox + x * vw * sc) : ox + x * vw * sc, oy + y * vh * sc];
     const l = Pose.lm; if (!l) return; const sw = Math.hypot((l[11].x - l[12].x) * vw, (l[11].y - l[12].y) * vh) * sc;
     this.draw(g, toXY, sw);
   },
@@ -2214,10 +2223,22 @@ self.onmessage = async (e) => {
     this.detect(); if (!this.fresh) return; this.fresh = false; this.process();
   },
   adapt: { L: 1, R: 1 }, nm: { L: 0, R: 0 }, nmX: { L: false, R: false },
-  filt: new Map(), prevSc: { L: 0, R: 0 }, label: '', labelT: 0, armed: { L: true, R: true }, peakE: { L: 0, R: 0 }, lastHit: { L: 0, R: 0 }, still: 0, calMode: null, calPeaks: [], calCur: { L: 0, R: 0 }, calLean: { l: 0, r: 0 },
+  filt: new Map(), prevSc: { L: 0, R: 0 }, label: '', labelT: 0, armed: { L: true, R: true }, peakE: { L: 0, R: 0 }, lastHit: { L: 0, R: 0 }, still: 0, calMode: null, calPeaks: [], calCur: { L: 0, R: 0 }, calHand: { L: 0, R: 0 }, calLean: { l: 0, r: 0 },
   F(k, x, t, minCut, beta) { let f = this.filt.get(k); if (!f) this.filt.set(k, f = new OneEuro(minCut, beta)); return f.f(x, t); },
+  // algunas cámaras (o apps como DroidCam/OBS) entregan la imagen en espejo y los brazos salen al revés:
+  // en ese caso se espeja la pose y se intercambian izquierda y derecha
+  flipOn() { return S.camFlip === 'si' || (S.camFlip !== 'no' && !!S.autoFlip); },
+  lastFlip: null,
+  reflip() {
+    const c = this.calib, vw = this.video.videoWidth || 640;
+    if (c) { c.noseX = vw - c.noseX; c.leanBase = -c.leanBase; const e = c.e0L; c.e0L = c.e0R; c.e0R = e; }
+    this.filt.clear(); this.hist.L.length = this.hist.R.length = 0; this.prevSc = { L: 0, R: 0 }; this.armed = { L: true, R: true };
+    $('#camVideo').classList.toggle('mirror', camMirror());
+  },
   process() {
-    const lm = this.lm, vw = this.video.videoWidth || 640, vh = this.video.videoHeight || 480, t = performance.now() / 1000, W3 = this.wlm;
+    const flip = this.flipOn();
+    if (this.lastFlip !== null && flip !== this.lastFlip) this.reflip(); this.lastFlip = flip;
+    const lm = this.lmP = flip ? flipPose(this.lm, true) : this.lm, vw = this.video.videoWidth || 640, vh = this.video.videoHeight || 480, t = performance.now() / 1000, W3 = this.wlmP = this.wlm ? (flip ? flipPose(this.wlm, false) : this.wlm) : null;
     const raw = i => lm[i];
     const P = i => { const r = raw(i); return { x: this.F('x' + i, r.x * vw, t, 1.3, .025), y: this.F('y' + i, r.y * vh, t, 1.3, .025), v: r.visibility ?? 1 }; };
     const Z = i => W3 ? { x: this.F('X' + i, W3[i].x, t, 1.3, 6), y: this.F('Y' + i, W3[i].y, t, 1.3, 6), z: this.F('Z' + i, W3[i].z, t, 1.3, 6) } : null;
@@ -2258,7 +2279,7 @@ self.onmessage = async (e) => {
       const upper = (-vy) / (7 * thh) * (old.relY > 0 ? 1 : .5) * (relY < .45 ? 1 : 0);
       straightMax = Math.max(straightMax, straight);
       // escaneo de golpes durante la calibración
-      if (this.calMode === 'punch') { const m = Math.max(straight, hook * .9, upper * .9) * thh; if (m > .3) this.calCur[h] = Math.max(this.calCur[h], m); else if (this.calCur[h] > 0 && m < .2) { this.calPeaks.push(this.calCur[h]); this.calCur[h] = 0; } continue; }
+      if (this.calMode === 'punch') { const m = Math.max(straight, hook * .9, upper * .9) * thh; if (m > .3) this.calCur[h] = Math.max(this.calCur[h], m); else if (this.calCur[h] > 0 && m < .2) { this.calPeaks.push(this.calCur[h]); this.calHand[h] += this.calCur[h]; this.calCur[h] = 0; } continue; }
       // se rearma cuando la mano vuelve a la guardia
       if (!this.armed[h] && (t - this.lastHit[h] > .4 || (W3 ? ext < this.peakE[h] - .07 : Math.hypot(vx, vy) < 3) || relY < -.15)) this.armed[h] = true;
       if (!this.armed[h] || t - this.lastHit[h] < .14) continue;
@@ -2307,7 +2328,7 @@ self.onmessage = async (e) => {
   // captura la postura neutral en guardia
   capture() {
     if (!this.now || !this.lm) return false;
-    const n = this.now, w = this.wlm, old = this.calib;
+    const n = this.now, w = this.wlmP || this.wlm, old = this.calib;
     this.calib = { sw: n.sw, noseX: n.nose.x, noseY: n.nose.y, e0L: w ? w[11].z - w[15].z : 0, e0R: w ? w[12].z - w[16].z : 0, leanBase: n.hips ? (n.nose.x - n.hips.x) / n.sw : 0, hasHips: !!n.hips, noseZ: n.nz, pk: old?.pk || 1, leanR: old?.leanR || .5 };
     this.hist.L.length = this.hist.R.length = 0; this.events.length = 0; this.armed.L = this.armed.R = true; return true;
   },
@@ -2316,14 +2337,14 @@ self.onmessage = async (e) => {
     const g = cv.getContext('2d'), W = cv.width, H = cv.height, v = this.video;
     g.fillStyle = '#000'; g.fillRect(0, 0, W, H);
     if (!this.stream || v.readyState < 2) { g.fillStyle = '#8d98a3'; g.font = '600 18px "Barlow Condensed"'; g.textAlign = 'center'; g.fillText('SIN CÁMARA', W / 2, H / 2); return; }
-    g.save(); if (S.mirror) { g.translate(W, 0); g.scale(-1, 1); } g.drawImage(v, 0, 0, W, H); g.restore();
+    g.save(); if (camMirror()) { g.translate(W, 0); g.scale(-1, 1); } g.drawImage(v, 0, 0, W, H); g.restore();
     if (!this.lm || !this.tracking) return;
-    const toXY = (x, y) => [S.mirror ? W - x * W : x * W, y * H];
+    const toXY = (x, y) => [camMirror() ? W - x * W : x * W, y * H];
     if (withFace) { const l = this.lm, sw = Math.hypot((l[11].x - l[12].x) * W, (l[11].y - l[12].y) * H); PlayerFace.draw(g, toXY, sw); }
     if (!S.showSkeleton) return;
     g.lineWidth = Math.max(2, W / 160); g.strokeStyle = 'rgba(224,169,59,.9)';
     for (const [a, b] of BONES) { const A = this.lm[a], B = this.lm[b]; if ((A.visibility ?? 1) < .3 || (B.visibility ?? 1) < .3) continue; const [x1, y1] = toXY(A.x, A.y), [x2, y2] = toXY(B.x, B.y); g.beginPath(); g.moveTo(x1, y1); g.lineTo(x2, y2); g.stroke(); }
-    for (const i of [15, 16]) { const p = this.lm[i]; const [x, y] = toXY(p.x, p.y); g.fillStyle = i === 15 ? '#2463c9' : '#c4161c'; g.beginPath(); g.arc(x, y, W / 36, 0, 7); g.fill(); g.strokeStyle = '#fff'; g.lineWidth = 2; g.stroke(); }
+    for (const i of [15, 16]) { const p = this.lm[i]; const [x, y] = toXY(p.x, p.y); g.fillStyle = (i === 15) !== this.flipOn() ? '#2463c9' : '#c4161c'; g.beginPath(); g.arc(x, y, W / 36, 0, 7); g.fill(); g.strokeStyle = '#fff'; g.lineWidth = 2; g.stroke(); }
   },
 };
 
@@ -2352,6 +2373,9 @@ glCanvas.addEventListener('mousedown', e => {
 glCanvas.addEventListener('contextmenu', e => e.preventDefault());
 
 // Entrada unificada del jugador
+function camMirror() { return !!S.mirror !== Pose.flipOn(); }
+const FLIP_IDX = [0, 4, 5, 6, 1, 2, 3, 8, 7, 10, 9, 12, 11, 14, 13, 16, 15, 18, 17, 20, 19, 22, 21, 24, 23, 26, 25, 28, 27, 30, 29, 32, 31];
+function flipPose(a, img) { return FLIP_IDX.map(j => { const p = a[j]; return { x: img ? 1 - p.x : -p.x, y: p.y, z: p.z, visibility: p.visibility }; }); }
 const Inp = { guard: false, leanX: 0, duck: 0, back: 0, gL: new V3(), gR: new V3(), cam: false, events: [] };
 let keyboardOnly = false;
 function readInput(dt) {
@@ -3124,6 +3148,7 @@ const SET_FIELDS = [
   { g: 'Cámara y control', id: 'trackModel', label: 'Rastreo corporal', type: 'select', options: [['full', 'Preciso (recomendado)'], ['lite', 'Rápido (PC lento)']] },
   { g: 'Cámara y control', id: 'punchSens', label: 'Sensibilidad de golpes', type: 'range', min: .5, max: 2, step: .05, fmt: mult },
   { g: 'Cámara y control', id: 'dodgeSens', label: 'Sensibilidad de esquiva', type: 'range', min: .5, max: 2, step: .05, fmt: mult },
+  { g: 'Cámara y control', id: 'camFlip', label: 'Lados izquierda / derecha', type: 'select', options: [['auto', 'Automático (se detecta al calibrar)'], ['no', 'Normales'], ['si', 'Invertidos (si tus brazos salen al revés)']] },
   { g: 'Cámara y control', id: 'stance', label: 'Guardia', type: 'select', options: [['ortodoxa', 'Ortodoxa (izquierda adelante)'], ['zurda', 'Zurda (derecha adelante)']] },
   { g: 'Cámara y control', id: 'mirror', label: 'Ver la cámara como espejo', type: 'toggle' },
   { g: 'Cámara y control', id: 'showSkeleton', label: 'Mostrar esqueleto rastreado', type: 'toggle' },
@@ -3185,7 +3210,7 @@ const Face = {
     const l = Pose.lm, v = Pose.video; if (!l || !Pose.tracking) { this.prog = 0; return 'No te veo. Ponte frente a la cámara.'; }
     const vw = v.videoWidth || 640, vis = [0, 2, 5, 7, 8].every(i => (l[i].visibility ?? 1) > .5);
     const earD = Math.abs(l[7].x - l[8].x) * vw, ratio = Math.abs(l[0].x - (l[7].x + l[8].x) / 2) * vw / Math.max(1, earD);
-    const roll = Math.atan2((l[2].y - l[5].y) * (v.videoHeight || 480), (l[2].x - l[5].x) * vw);
+    const ea = l[2].x >= l[5].x ? l[2] : l[5], eb = ea === l[2] ? l[5] : l[2], roll = Math.atan2((ea.y - eb.y) * (v.videoHeight || 480), (ea.x - eb.x) * vw);
     let msg = '';
     if (!vis) msg = 'Se te ve mal la cara: busca luz de frente.';
     else if (earD < vw * .1) msg = 'Acércate más a la cámara (a unos 60 cm).';
@@ -3209,7 +3234,7 @@ const Face = {
   },
   capture(slot = 'n') {
     const l = Pose.lm, v = Pose.video, vw = v.videoWidth || 640, vh = v.videoHeight || 480, P = i => ({ x: l[i].x * vw, y: l[i].y * vh });
-    const eL = P(2), eR = P(5), mL = P(9), mR = P(10);
+    let eL = P(2), eR = P(5); if (eL.x < eR.x) [eL, eR] = [eR, eL]; const mL = P(9), mR = P(10);
     const em = { x: (eL.x + eR.x) / 2, y: (eL.y + eR.y) / 2 }, mm = { x: (mL.x + mR.x) / 2, y: (mL.y + mR.y) / 2 };
     const iod = Math.max(8, Math.hypot(eL.x - eR.x, eL.y - eR.y)), roll = Math.atan2(eL.y - eR.y, eL.x - eR.x), k = 140 / iod;
     this.build(v, vw, vh, { cx: em.x, cy: em.y, s: k, r: -roll }, Math.hypot(mm.x - em.x, mm.y - em.y) * k, slot);
@@ -3287,6 +3312,35 @@ function applyFaces() {
   if (M.meB) M.meB.setPhoto(mine);
   if (M.oppB) M.oppB.setPhoto(riv || (M.active && M.mode === 'online' && Net.peerFace) || null);
 }
+// canción del menú elegida por el jugador (guardada en IndexedDB de este navegador)
+const MyMusic = {
+  el: null, url: null, name: '',
+  db() { return new Promise((ok, bad) => { const r = indexedDB.open('eyeOfATiger', 1); r.onupgradeneeded = () => r.result.createObjectStore('kv'); r.onsuccess = () => ok(r.result); r.onerror = () => bad(r.error); }); },
+  async put(v) { const d = await this.db(); await new Promise((ok, bad) => { const t = d.transaction('kv', 'readwrite'), st = t.objectStore('kv'); v ? st.put(v, 'menuSong') : st.delete('menuSong'); t.oncomplete = ok; t.onerror = () => bad(t.error); }); },
+  async get() { const d = await this.db(); return new Promise(ok => { const r = d.transaction('kv').objectStore('kv').get('menuSong'); r.onsuccess = () => ok(r.result || null); r.onerror = () => ok(null); }); },
+  set(blob, name) {
+    if (!this.el) { this.el = new Audio(); this.el.loop = true; this.el.preload = 'auto'; }
+    if (this.url) URL.revokeObjectURL(this.url);
+    this.url = blob ? URL.createObjectURL(blob) : null; this.name = blob ? name : '';
+    if (this.url) this.el.src = this.url; else { this.el.pause(); this.el.removeAttribute('src'); }
+    this.ui();
+  },
+  restart() { if (Snd.ctx && !M.active) { Snd.musicOff(); Snd.musicOn(); } },
+  async restore() { try { const v = await this.get(); if (v && v.blob) { this.set(v.blob, v.name); this.restart(); } } catch (e) {} },
+  async pick(f) {
+    if (!f) return;
+    if (!/^audio\//.test(f.type) && !/\.(mp3|m4a|ogg|wav|aac|flac)$/i.test(f.name)) { openConfirm('No es una canción', 'Elige un archivo de audio: MP3, M4A, OGG o WAV.', null, 'Entendido'); return; }
+    Snd.musicOff(); this.set(f, f.name.replace(/\.[^.]+$/, '')); this.restart();
+    try { await this.put({ blob: f, name: this.name }); } catch (e) {}
+  },
+  async clear() { Snd.musicOff(); this.set(null); this.restart(); try { await this.put(null); } catch (e) {} },
+  ui() { const n = $('#songName'); if (n) n.textContent = this.name ? '♪ ' + this.name : 'Música original del juego'; const d = $('#songDel'); if (d) d.disabled = !this.name; },
+};
+$('#songPick').onclick = () => { const f = $('#songFile'); f.value = ''; f.click(); };
+$('#songFile').onchange = e => MyMusic.pick(e.target.files && e.target.files[0]);
+$('#songDel').onclick = () => MyMusic.clear();
+MyMusic.ui();
+
 // editor para encuadrar una foto subida (normal, feliz o sorpresa)
 const FaceEd = {
   src: null, w: 0, h: 0, tf: null, z: 0, s0: 1, r0: 0, r: 0, emd: 150, drag: null, slot: 'n',
@@ -3352,7 +3406,7 @@ $('#faceScan').onclick = () => { if (!Pose.stream) return; Face.scanning = true;
 const CAL_STEPS = [
   { title: 'Encuadre', hint: 'Aléjate hasta que se vean tu cabeza, hombros, codos y cadera. Busca buena luz de frente.' },
   { title: 'Ponte en guardia', hint: 'Sube los dos puños a la cara y quédate quieto mientras te escaneamos.' },
-  { title: 'Lanza golpes', hint: 'Lanza 4 golpes rápidos hacia la pantalla, como en una pelea. Así medimos tu velocidad.' },
+  { title: 'Lanza jabs', hint: 'Lanza 4 jabs rápidos hacia la pantalla SOLO con tu mano de adelante: la IZQUIERDA (la derecha si elegiste guardia zurda). Así medimos tu velocidad y comprobamos que la cámara no vea tus brazos al revés.' },
   { title: 'Esquiva', hint: 'Inclina la cabeza y el torso a la izquierda y luego a la derecha, como esquivando un golpe.' },
   { title: 'Tu cara (opcional)', hint: '¿Quieres que la cabeza de un boxeador sea tu foto? Acércate a la cámara, mira de frente y pulsa Escanear: sacamos tu cara normal, sonriendo y sorprendido. Si no, pulsa Pelear.' },
 ];
@@ -3365,7 +3419,7 @@ const Calib = {
     $('#calibNow').textContent = n <= 1 ? 'Calibrar ahora' : n === 4 ? '¡A pelear!' : 'Saltar este paso';
     $('#calibFace').hidden = n !== 4; Face.scanning = false; Face.prog = 0; Face.stage = 'n';
     if (n === 4) { Face.drawThumb(); faceWhereUI(); $('#faceScan').textContent = Face.canvas ? 'Volver a escanear' : 'Escanear mi cara'; }
-    Pose.calMode = n === 2 ? 'punch' : n === 3 ? 'lean' : null; Pose.calPeaks = []; Pose.calCur = { L: 0, R: 0 }; Pose.calLean = { l: 0, r: 0 };
+    Pose.calMode = n === 2 ? 'punch' : n === 3 ? 'lean' : null; Pose.calPeaks = []; Pose.calCur = { L: 0, R: 0 }; Pose.calHand = { L: 0, R: 0 }; Pose.calLean = { l: 0, r: 0 };
   },
   async open(cb, back) {
     this.cb = cb; this.back = back; this.active = true; show('calib'); this.setStep(0);
@@ -3381,7 +3435,7 @@ const Calib = {
     const gr = g.createLinearGradient(0, this.scanY - 40, 0, this.scanY + 4); gr.addColorStop(0, 'rgba(224,169,59,0)'); gr.addColorStop(1, 'rgba(224,169,59,.35)');
     g.fillStyle = gr; g.fillRect(0, this.scanY - 40, W, 44); g.fillStyle = 'rgba(255,220,140,.9)'; g.fillRect(0, this.scanY, W, 2);
     if (Pose.lm && Pose.tracking) {
-      const toXY = (x, y) => [S.mirror ? W - x * W : x * W, y * H];
+      const toXY = (x, y) => [camMirror() ? W - x * W : x * W, y * H];
       for (const i of [0, 11, 12, 13, 14, 15, 16, 23, 24]) {
         const l = Pose.lm[i]; if ((l.visibility ?? 1) < .4) continue; const [x, y] = toXY(l.x, l.y), near = Math.abs(y - this.scanY) < 30;
         g.fillStyle = near ? '#fff' : 'rgba(224,169,59,.95)'; g.beginPath(); g.arc(x, y, near ? 7 : 4.5, 0, 7); g.fill();
@@ -3389,7 +3443,7 @@ const Calib = {
       }
     }
     if (this.step === 4 && Pose.lm && Pose.tracking) {
-      const l = Pose.lm, X = x => S.mirror ? W - x * W : x * W, cx = (X(l[7].x) + X(l[8].x)) / 2, cy = (l[2].y + l[5].y) / 2 * H + Math.abs(X(l[7].x) - X(l[8].x)) * .25, rx = Math.abs(X(l[7].x) - X(l[8].x)) * .62;
+      const l = Pose.lm, X = x => camMirror() ? W - x * W : x * W, cx = (X(l[7].x) + X(l[8].x)) / 2, cy = (l[2].y + l[5].y) / 2 * H + Math.abs(X(l[7].x) - X(l[8].x)) * .25, rx = Math.abs(X(l[7].x) - X(l[8].x)) * .62;
       g.strokeStyle = Face.scanning ? `rgba(255,215,106,${.6 + .4 * Math.sin(performance.now() / 120)})` : 'rgba(241,232,214,.7)'; g.lineWidth = 3; g.beginPath(); g.ellipse(cx, cy, rx, rx * 1.3, 0, 0, 7); g.stroke();
       if (Face.scanning) { g.fillStyle = 'rgba(224,169,59,.9)'; g.fillRect(cx - rx, cy + rx * 1.4, rx * 2 * clamp(Face.prog, 0, 1), 5); }
     }
@@ -3413,11 +3467,15 @@ const Calib = {
       const n = Pose.calPeaks.length; this.prog = n / 4; st.textContent = n ? `Golpes medidos: ${n} de 4` : '¡Dale! Golpes rápidos hacia la pantalla.';
       if (n >= 4 || (this.stepT > 9 && n >= 2)) {
         const pk = Pose.calPeaks.slice().sort((a, b) => a - b), med = pk[Math.floor(pk.length / 2)];
-        Pose.calib.pk = clamp(med * .5, .45, 1.6); Snd.ui(); this.setStep(3);
+        Pose.calib.pk = clamp(med * .5, .45, 1.6); Snd.ui();
+        // si los jabs salieron con la otra mano, la cámara está en espejo: se corrige sola
+        const ld = S.stance === 'zurda' ? 'R' : 'L', ot = ld === 'L' ? 'R' : 'L', ch = Pose.calHand;
+        if (S.camFlip === 'auto' && ch[ot] > ch[ld] * 1.6) { S.autoFlip = !S.autoFlip; saveAll(); this.flipNote = 'Tu cámara venía en espejo: ya corregimos izquierda y derecha.'; Snd.bell(1); }
+        this.setStep(3);
       } else if (this.stepT > 14) this.setStep(3);
     } else if (this.step === 3) {
       const L = -Pose.calLean.l, R = Pose.calLean.r; this.prog = (Math.min(1, L / .25) + Math.min(1, R / .25)) / 2;
-      st.textContent = `Izquierda ${L > .2 ? '✓' : '…'}   Derecha ${R > .2 ? '✓' : '…'}`;
+      st.textContent = (this.flipNote && this.stepT < 4 ? this.flipNote + '  ·  ' : '') + `Izquierda ${L > .2 ? '✓' : '…'}   Derecha ${R > .2 ? '✓' : '…'}`;
       if ((L > .2 && R > .2 && this.stepT > 1.2) || this.stepT > 12) { if (L > .12 && R > .12) Pose.calib.leanR = clamp(Math.min(L, R) * .65, .18, .9); Pose.calMode = null; this.setStep(4); }
     } else if (this.step === 4) {
       this.prog = Face.canvas ? 1 : Face.prog;
@@ -3595,7 +3653,7 @@ function loop(now) {
 async function init() {
   resize(); buildComposer();
   try { await Promise.race([Promise.all([document.fonts.load('100px Anton'), document.fonts.load('600 20px "Barlow Condensed"')]), new Promise(r => setTimeout(r, 2500))]); } catch (e) {}
-  FX.init(); Confetti.init(); menuScene(); menuCamPill(); Face.restore(); Face.drawThumb(); $('#fps').hidden = !S.showFps;
+  FX.init(); Confetti.init(); menuScene(); menuCamPill(); Face.restore(); Face.drawThumb(); MyMusic.restore(); $('#fps').hidden = !S.showFps;
   requestAnimationFrame(loop);
   $('#splashMsg').textContent = 'Boxea con tu cuerpo frente a la cámara';
   $('#splashBtn').hidden = false; $('#splashBtn').focus();
