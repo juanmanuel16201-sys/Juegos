@@ -127,7 +127,7 @@ input[type=range]::-moz-range-thumb{width:22px;height:22px;border-radius:50%;bac
     <button class="btn alt" data-go="options">⚙ OPCIONES</button>
     <button class="btn alt" data-go="how">? CÓMO JUGAR</button>
   </div>
-  <div class="foot">PC con webcam o celular apoyado en horizontal · cámara frontal</div>
+  <div class="foot">PC con webcam o celular en horizontal · cámara frontal o trasera</div>
 </div>
 
 <!-- SETUP -->
@@ -151,6 +151,7 @@ input[type=range]::-moz-range-thumb{width:22px;height:22px;border-radius:50%;bac
       <button class="card" data-ctrl="camara"><b>📷 CÁMARA (AR)</b><span>Rastreo de tus manos: bota, agarra y lanza de verdad.</span></button>
       <button class="card" data-ctrl="tactil"><b>👆 TÁCTIL / MOUSE</b><span>Toca para botar, arrastra y desliza hacia arriba para tirar.</span></button>
     </div>
+    <div id="facingRow" class="opt" style="margin:-6px 0 14px"><span>🎥 Cámara</span><div class="seg" data-key="facing"><button data-v="user">FRONTAL</button><button data-v="environment">TRASERA</button></div></div>
     <div class="row"><button class="btn" id="btnStart" style="flex:2">¡A LA CANCHA!</button><button class="btn alt" data-go="menu" style="flex:1">VOLVER</button></div>
   </div>
 </div>
@@ -165,6 +166,7 @@ input[type=range]::-moz-range-thumb{width:22px;height:22px;border-radius:50%;bac
     <div class="opt"><span>🎯 Ayuda de tiro</span><div class="seg" data-key="assist"><button data-v="facil">FÁCIL</button><button data-v="normal">NORMAL</button><button data-v="pro">PRO</button></div></div>
     <div class="opt"><span>💪 Sensibilidad de lanzamiento</span><input type="range" id="optSens" min="0.6" max="1.6" step="0.05"></div>
     <div class="opt"><span>📷 Ver cámara en pantalla</span><div class="seg" data-key="preview"><button data-v="true">SÍ</button><button data-v="false">NO</button></div></div>
+    <div class="opt"><span>🎥 Cámara a usar</span><div class="seg" data-key="facing"><button data-v="user">FRONTAL</button><button data-v="environment">TRASERA</button></div></div>
     <div class="opt"><span>🪞 Modo espejo</span><div class="seg" data-key="mirror"><button data-v="true">SÍ</button><button data-v="false">NO</button></div></div>
     <div class="row" style="margin-top:16px"><button class="btn" id="btnOptBack">LISTO</button></div>
   </div>
@@ -175,7 +177,7 @@ input[type=range]::-moz-range-thumb{width:22px;height:22px;border-radius:50%;bac
   <div class="panel">
     <h2>CÓMO JUGAR</h2>
     <div class="how">
-      <div><b>1 · Ubícate.</b> A 1–1.5 m de la cámara, con buena luz, que se vean tus manos. En celular: apóyalo en horizontal con la cámara frontal hacia ti.</div>
+      <div><b>1 · Ubícate.</b> A 1–1.5 m de la cámara, con buena luz, que se vean tus manos. En celular puedes usar la cámara <b>frontal</b> (pantalla hacia ti) o la <b>trasera</b> (más nítida, ideal si alguien sostiene el celular o lo apoyas apuntándote). La cancha se ve igual con cualquiera; si los movimientos salen al revés, cambia el <b>Modo espejo</b> en Opciones.</div>
       <div><b>2 · Bota 🖐.</b> Con la mano abierta, golpea el balón hacia abajo rápido. Bota 3 veces antes de tirar = bonus <b>RITUAL +25</b>.</div>
       <div><b>3 · Agarra ✊.</b> Cierra la mano (o las dos manos) sobre el balón. Puedes tirar con una o con dos manos.</div>
       <div><b>4 · Lanza 🚀.</b> Empuja la mano hacia arriba y hacia la pantalla y <b>ÁBRELA</b> para soltar. La fuerza del gesto es la potencia: busca la zona blanca del medidor. Si subes la mano al tope de la pantalla, también suelta.</div>
@@ -241,7 +243,7 @@ const IS_MOBILE = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) |
 if (IS_MOBILE) $('#rotateHint').classList.add('mob');
 
 /* ================= AJUSTES ================= */
-const DEFAULTS = { music: 0.6, sfx: 0.85, quality: IS_MOBILE ? 'medio' : 'alto', assist: 'normal', control: 'camara', preview: true, mirror: true, sens: 1.0, venue: 'pro', mode: 'clasico' };
+const DEFAULTS = { music: 0.6, sfx: 0.85, quality: IS_MOBILE ? 'medio' : 'alto', assist: 'normal', control: 'camara', preview: true, mirror: true, facing: 'user', sens: 1.0, venue: 'pro', mode: 'clasico' };
 let S = { ...DEFAULTS };
 let BEST = { clasico: 0, tiempo: 0, fuego: 0 };
 try {
@@ -572,15 +574,21 @@ function updateHandVis() {
 
 /* ================= CÁMARA + MEDIAPIPE ================= */
 const video = $('#cam');
-const CAM = { on: false, lm: null, stream: null, lastVT: -1 };
+const CAM = { on: false, lm: null, stream: null, lastVT: -1, facing: null };
 async function startCamera() {
-  if (CAM.on && CAM.lm) return true;
-  setLoading(true, 'Activando cámara…');
+  if (CAM.stream && CAM.facing !== S.facing) { CAM.stream.getTracks().forEach(t => t.stop()); CAM.stream = null; video.srcObject = null; CAM.on = false; CAM.lastVT = -1; }
+  if (CAM.on && CAM.lm && CAM.stream) return true;
+  setLoading(true, S.facing === 'environment' ? 'Activando cámara trasera…' : 'Activando cámara frontal…');
   try {
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error('https');
     if (!CAM.stream) {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: IS_MOBILE ? 640 : 960 }, height: { ideal: IS_MOBILE ? 480 : 540 }, frameRate: { ideal: 30 } }, audio: false });
-      video.srcObject = stream; CAM.stream = stream;
+      const vc = fm => ({ video: { facingMode: fm, width: { ideal: IS_MOBILE ? 640 : 960 }, height: { ideal: IS_MOBILE ? 480 : 540 }, frameRate: { ideal: 30 } }, audio: false });
+      let stream;
+      if (S.facing === 'environment') {
+        try { stream = await navigator.mediaDevices.getUserMedia(vc({ exact: 'environment' })); }
+        catch (e2) { if (e2 && e2.name === 'NotAllowedError') throw e2; stream = await navigator.mediaDevices.getUserMedia(vc('user')); toast('Este dispositivo no tiene cámara trasera: usando la que hay.'); }
+      } else stream = await navigator.mediaDevices.getUserMedia(vc('user'));
+      video.srcObject = stream; CAM.stream = stream; CAM.facing = S.facing;
     }
     await video.play();
     if (!CAM.lm) {
@@ -1404,6 +1412,7 @@ function refreshSetup() {
   $$('#modeGrid .card').forEach(c => c.classList.toggle('sel', c.dataset.mode === S.mode));
   $$('#venueGrid .card').forEach(c => c.classList.toggle('sel', c.dataset.venue === S.venue));
   $$('#ctrlGrid .card').forEach(c => c.classList.toggle('sel', c.dataset.ctrl === S.control));
+  $('#facingRow').style.display = S.control === 'camara' ? '' : 'none'; refreshOptions();
   $$('[data-best]').forEach(e => { const b = BEST[e.dataset.best]; e.textContent = b ? `RÉCORD: ${b}` : 'Sin récord aún'; });
 }
 $$('#modeGrid .card').forEach(c => c.addEventListener('click', () => { S.mode = c.dataset.mode; saveS(); SFX.ui(); refreshSetup(); }));
@@ -1417,6 +1426,7 @@ $$('.seg').forEach(sg => sg.querySelectorAll('button').forEach(b => b.addEventLi
   const k = sg.dataset.key; let v = b.dataset.v; if (v === 'true') v = true; else if (v === 'false') v = false;
   const prevQ = S.quality; S[k] = v; saveS(); SFX.ui(); refreshOptions();
   if (k === 'quality' && v !== prevQ) { applyQuality(); buildArena(S.venue); }
+  if (k === 'facing') { S.mirror = v === 'user'; saveS(); refreshOptions(); if ((G.state === 'play' || G.state === 'paused') && S.control === 'camara') startCamera(); }
   if (k === 'assist') { const a = ASSIST[S.assist]; $('#pSweet').style.left = (50 - a.sweet * 25) + '%'; $('#pSweet').style.width = (a.sweet * 50) + '%'; }
 })));
 $('#optMusic').addEventListener('input', e => { S.music = +e.target.value; saveS(); applyVolumes(); });
@@ -1500,5 +1510,6 @@ function render() {
   loop();
 })();
 </script>
+<script src="../volver.js"></script>
 </body>
 </html>
