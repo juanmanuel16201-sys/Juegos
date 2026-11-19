@@ -3,6 +3,8 @@
 (() => {
   if (window.__volverJuegos) return;
   window.__volverJuegos = true;
+  // posición opcional: <script src="../volver.js" data-pos="izq-centro"> para juegos con algo en la esquina
+  const pos = (document.currentScript && document.currentScript.dataset.pos) || "";
 
   const css = `
   #volver-juegos{position:fixed;z-index:2147483647;top:calc(10px + env(safe-area-inset-top));left:calc(10px + env(safe-area-inset-left));
@@ -15,6 +17,7 @@
   #volver-juegos span{max-width:0;overflow:hidden;white-space:nowrap;transition:max-width .25s}
   #volver-juegos.abierto,#volver-juegos:hover,#volver-juegos:focus-visible{opacity:1;gap:8px;background:rgba(8,12,28,.85)}
   #volver-juegos.abierto span,#volver-juegos:hover span,#volver-juegos:focus-visible span{max-width:160px}
+  #volver-juegos.izq-centro{top:50%;transform:translateY(-50%)}
   @media print{#volver-juegos{display:none}}`;
 
   const add = () => {
@@ -25,6 +28,7 @@
 
     const b = document.createElement("button");
     b.id = "volver-juegos";
+    if (pos) b.classList.add(pos);
     b.type = "button";
     b.setAttribute("aria-label", "Volver al menú de juegos");
     b.innerHTML = '<i class="o"></i><span>Volver a juegos</span>';
